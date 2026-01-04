@@ -145,3 +145,6 @@ No License - feel free to modify and distribute.
 ---
 
 **Enjoy viewing Earth in true 3D!**
+
+git branch -M main
+git push -u origin main
