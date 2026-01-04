@@ -1,0 +1,1446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stereo Earth - Stereoscopic 3D Globe Viewer</title>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.113/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.113/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        #header {
+            background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%);
+            padding: 8px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #0f3460;
+            z-index: 100;
+            flex-shrink: 0;
+        }
+
+        #header h1 {
+            font-size: 1.3em;
+            color: #e94560;
+            text-shadow: 0 0 10px rgba(233, 69, 96, 0.5);
+        }
+
+        #stereo-mode-indicator {
+            background: rgba(233, 69, 96, 0.9);
+            padding: 5px 15px;
+            border-radius: 15px;
+            font-size: 0.8em;
+            display: none;
+        }
+
+        #main-content {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        #viewer-container {
+            flex: 1;
+            display: flex;
+            position: relative;
+            min-width: 0;
+        }
+
+        #viewer-container.side-by-side {
+            flex-direction: row;
+        }
+
+        #viewer-container.side-by-side .cesium-viewer-wrapper {
+            flex: 1;
+            position: relative;
+        }
+
+        #viewer-container.anaglyph {
+            flex-direction: row;
+        }
+
+        #viewer-container.anaglyph .cesium-viewer-wrapper {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #viewer-container.anaglyph #leftWrapper {
+            z-index: 1;
+            filter: url(#redFilter);
+            pointer-events: auto !important;
+        }
+
+        #viewer-container.anaglyph #rightWrapper {
+            z-index: 2;
+            mix-blend-mode: lighten;
+            filter: url(#cyanFilter);
+            pointer-events: none !important;
+        }
+
+        #viewer-container.anaglyph #rightWrapper * {
+            pointer-events: none !important;
+        }
+
+        #viewer-container.anaglyph .eye-label {
+            display: none;
+        }
+
+        .cesium-viewer-wrapper {
+            position: relative;
+            border: 2px solid #0f3460;
+            min-width: 0;
+        }
+
+        .cesium-viewer-wrapper:first-child {
+            border-right: 1px solid #0f3460;
+        }
+
+        .cesium-viewer-wrapper:last-child {
+            border-left: 1px solid #0f3460;
+        }
+
+        #viewer-container.anaglyph .cesium-viewer-wrapper {
+            border: none;
+        }
+
+        /* Ensure left viewer is interactive */
+        #leftWrapper {
+            pointer-events: auto !important;
+        }
+
+        #leftWrapper * {
+            pointer-events: auto;
+        }
+
+        /* Disable right viewer interaction */
+        #rightWrapper {
+            pointer-events: none !important;
+        }
+
+        #rightWrapper * {
+            pointer-events: none !important;
+        }
+
+        .eye-label {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(15, 52, 96, 0.8);
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .cesium-viewer {
+            width: 100%;
+            height: 100%;
+        }
+
+        .cesium-viewer-toolbar,
+        .cesium-viewer-animationContainer,
+        .cesium-viewer-timelineContainer,
+        .cesium-viewer-fullscreenContainer,
+        .cesium-viewer-vrContainer,
+        .cesium-viewer-bottom {
+            display: none !important;
+        }
+
+        #sidebar {
+            width: 300px;
+            background: #16213e;
+            border-left: 1px solid #0f3460;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+
+        .panel {
+            border-bottom: 1px solid #0f3460;
+            padding: 12px 15px;
+        }
+
+        .panel h3 {
+            color: #e94560;
+            margin-bottom: 10px;
+            font-size: 0.9em;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .panel.collapsible h3 {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .panel.collapsible h3::after {
+            content: '▼';
+            font-size: 0.7em;
+            margin-left: auto;
+            transition: transform 0.2s;
+        }
+
+        .panel.collapsible.collapsed h3::after {
+            transform: rotate(-90deg);
+        }
+
+        .panel.collapsible.collapsed .panel-content {
+            display: none;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .info-item {
+            background: rgba(0,0,0,0.2);
+            padding: 6px 8px;
+            border-radius: 5px;
+        }
+
+        .info-item label {
+            display: block;
+            font-size: 0.65em;
+            color: #888;
+            margin-bottom: 2px;
+        }
+
+        .info-item .value {
+            font-size: 0.9em;
+            font-weight: bold;
+            color: #4ecca3;
+        }
+
+        .control-group {
+            margin-bottom: 12px;
+        }
+
+        .control-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .control-group label {
+            display: block;
+            font-size: 0.75em;
+            color: #aaa;
+            margin-bottom: 4px;
+        }
+
+        .control-group input[type="range"] {
+            width: 100%;
+            accent-color: #e94560;
+        }
+
+        .control-group .range-value {
+            text-align: center;
+            font-size: 0.85em;
+            color: #4ecca3;
+            margin-top: 3px;
+        }
+
+        .control-group select {
+            width: 100%;
+            padding: 6px;
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            color: #eee;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+
+        .control-group input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            color: #eee;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+
+        .control-group input[type="text"]:focus {
+            outline: none;
+            border-color: #e94560;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            background: linear-gradient(135deg, #e94560 0%, #0f3460 100%);
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-size: 0.8em;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 2px 10px rgba(233, 69, 96, 0.4);
+        }
+
+        .btn.secondary {
+            background: linear-gradient(135deg, #0f3460 0%, #16213e 100%);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Search results dropdown */
+        #searchResults {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            border-top: none;
+            border-radius: 0 0 4px 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+        }
+
+        #searchResults.visible {
+            display: block;
+        }
+
+        .search-result-item {
+            padding: 8px 10px;
+            cursor: pointer;
+            font-size: 0.8em;
+            border-bottom: 1px solid #0f3460;
+        }
+
+        .search-result-item:hover {
+            background: #0f3460;
+        }
+
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+
+        .search-wrapper {
+            position: relative;
+        }
+
+        /* Compass */
+        .compass-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 10px 0;
+        }
+
+        .compass {
+            width: 120px;
+            height: 120px;
+            position: relative;
+            cursor: grab;
+        }
+
+        .compass:active {
+            cursor: grabbing;
+        }
+
+        .compass svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .compass-heading {
+            text-align: center;
+            font-size: 0.85em;
+            color: #4ecca3;
+            margin-top: 5px;
+        }
+
+        #help-panel ul {
+            list-style: none;
+            padding: 0;
+            font-size: 0.75em;
+        }
+
+        #help-panel li {
+            margin-bottom: 5px;
+            color: #aaa;
+        }
+
+        #help-panel kbd {
+            background: #0f3460;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-family: monospace;
+            color: #4ecca3;
+            font-size: 0.95em;
+        }
+
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            pointer-events: none;
+            z-index: 5;
+            opacity: 0.5;
+        }
+
+        .crosshair::before,
+        .crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(233, 69, 96, 0.7);
+        }
+
+        .crosshair::before {
+            width: 2px;
+            height: 20px;
+            left: 9px;
+            top: 0;
+        }
+
+        .crosshair::after {
+            width: 20px;
+            height: 2px;
+            left: 0;
+            top: 9px;
+        }
+
+        #viewer-container.anaglyph .crosshair {
+            display: none;
+        }
+
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #1a1a2e;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid #0f3460;
+            border-top-color: #e94560;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        #loading-overlay p {
+            margin-top: 20px;
+            color: #888;
+        }
+
+        .mode-description {
+            font-size: 0.7em;
+            color: #888;
+            margin-top: 5px;
+            text-align: center;
+            font-style: italic;
+        }
+
+        .search-status {
+            font-size: 0.7em;
+            color: #888;
+            margin-top: 5px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <!-- SVG Filters for Anaglyph Mode -->
+    <svg style="position: absolute; width: 0; height: 0;">
+        <defs>
+            <filter id="redFilter" color-interpolation-filters="sRGB">
+                <feColorMatrix type="matrix" values="
+                    1 0 0 0 0
+                    0 0 0 0 0
+                    0 0 0 0 0
+                    0 0 0 1 0
+                "/>
+            </filter>
+            <filter id="cyanFilter" color-interpolation-filters="sRGB">
+                <feColorMatrix type="matrix" values="
+                    0 0 0 0 0
+                    0 1 0 0 0
+                    0 0 1 0 0
+                    0 0 0 1 0
+                "/>
+            </filter>
+        </defs>
+    </svg>
+
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <p>Loading Stereo Earth...</p>
+    </div>
+
+    <div id="app-container">
+        <header id="header">
+            <h1>🌍 Stereo Earth</h1>
+            <div id="stereo-mode-indicator">Cross-Eye Mode</div>
+        </header>
+
+        <div id="main-content">
+            <div id="viewer-container" class="side-by-side">
+                <div class="cesium-viewer-wrapper" id="leftWrapper">
+                    <div class="eye-label">LEFT EYE</div>
+                    <div id="cesiumContainerLeft" class="cesium-viewer"></div>
+                    <div class="crosshair"></div>
+                </div>
+                <div class="cesium-viewer-wrapper" id="rightWrapper">
+                    <div class="eye-label">RIGHT EYE</div>
+                    <div id="cesiumContainerRight" class="cesium-viewer"></div>
+                    <div class="crosshair"></div>
+                </div>
+            </div>
+
+            <div id="sidebar">
+                <!-- Search Panel -->
+                <div class="panel" id="search-panel">
+                    <h3>🔍 Location Search</h3>
+                    <div class="panel-content">
+                        <div class="control-group">
+                            <div class="search-wrapper">
+                                <input type="text" id="locationSearch" placeholder="Enter location (e.g., Paris, France)">
+                                <div id="searchResults"></div>
+                            </div>
+                            <button class="btn" id="searchBtn">Search</button>
+                            <div class="search-status" id="searchStatus"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Compass Panel -->
+                <div class="panel" id="compass-panel">
+                    <h3>🧭 Compass</h3>
+                    <div class="panel-content">
+                        <div class="compass-container">
+                            <div class="compass" id="compass">
+                                <svg viewBox="0 0 120 120">
+                                    <!-- Outer ring -->
+                                    <circle cx="60" cy="60" r="55" fill="none" stroke="#0f3460" stroke-width="3"/>
+                                    <!-- Tick marks -->
+                                    <g id="compassTicks">
+                                        <!-- Will be generated dynamically -->
+                                    </g>
+                                    <!-- Cardinal directions (static, don't rotate) -->
+                                    <g id="cardinalLabels" font-family="sans-serif" font-size="12" fill="#aaa" text-anchor="middle">
+                                        <text x="60" y="18">N</text>
+                                        <text x="105" y="64">E</text>
+                                        <text x="60" y="112">S</text>
+                                        <text x="15" y="64">W</text>
+                                    </g>
+                                    <!-- Rotating needle group -->
+                                    <g id="compassNeedle" transform="rotate(0, 60, 60)">
+                                        <!-- North pointer (red) -->
+                                        <polygon points="60,20 55,60 65,60" fill="#e94560"/>
+                                        <!-- South pointer (white) -->
+                                        <polygon points="60,100 55,60 65,60" fill="#aaa"/>
+                                        <!-- Center circle -->
+                                        <circle cx="60" cy="60" r="6" fill="#16213e" stroke="#4ecca3" stroke-width="2"/>
+                                    </g>
+                                </svg>
+                            </div>
+                            <div class="compass-heading" id="compassHeading">0° N</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Info Panel -->
+                <div class="panel" id="info-panel">
+                    <h3>📊 View Info</h3>
+                    <div class="panel-content">
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <label>Eye Separation</label>
+                                <div class="value" id="infoEyeSep">1,000 m</div>
+                            </div>
+                            <div class="info-item">
+                                <label>Altitude</label>
+                                <div class="value" id="infoAltitude">0 km</div>
+                            </div>
+                            <div class="info-item">
+                                <label>Ground Dist</label>
+                                <div class="value" id="infoGroundDist">0 km</div>
+                            </div>
+                            <div class="info-item">
+                                <label>View Angle</label>
+                                <div class="value" id="infoPitch">0°</div>
+                            </div>
+                            <div class="info-item">
+                                <label>Latitude</label>
+                                <div class="value" id="infoLat">0.000°</div>
+                            </div>
+                            <div class="info-item">
+                                <label>Longitude</label>
+                                <div class="value" id="infoLon">0.000°</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Controls Panel -->
+                <div class="panel" id="controls-panel">
+                    <h3>⚙️ Stereo Settings</h3>
+                    <div class="panel-content">
+                        <div class="control-group">
+                            <label>Viewing Mode</label>
+                            <select id="stereoMode">
+                                <option value="parallel">Cross-Eye (cross your eyes)</option>
+                                <option value="cross">Parallel (relax your eyes)</option>
+                                <option value="anaglyph">Anaglyph (red-cyan glasses)</option>
+                            </select>
+                            <div class="mode-description" id="modeDescription">Cross your eyes to merge the images</div>
+                        </div>
+
+                        <div class="control-group">
+                            <label>Eye Separation</label>
+                            <input type="range" id="eyeSeparation" min="10" max="100000" value="1000" step="10">
+                            <div class="range-value" id="eyeSeparationValue">1,000 m</div>
+                        </div>
+
+                        <div class="control-group">
+                            <label>View Angle (Pitch)</label>
+                            <input type="range" id="viewAngle" min="-90" max="0" value="-45" step="1">
+                            <div class="range-value" id="viewAngleValue">-45°</div>
+                        </div>
+
+                        <div class="control-group">
+                            <label>Terrain Exaggeration</label>
+                            <input type="range" id="terrainExaggeration" min="1" max="10" value="1" step="0.5">
+                            <div class="range-value" id="terrainExaggerationValue">1.0x</div>
+                        </div>
+
+                        <div class="control-group">
+                            <label>Go to Coordinates</label>
+                            <div style="display: flex; gap: 5px;">
+                                <input type="text" id="latInput" placeholder="Lat" style="width: 50%;">
+                                <input type="text" id="lonInput" placeholder="Lon" style="width: 50%;">
+                            </div>
+                            <button class="btn secondary" id="goToCoords" style="margin-top: 5px;">Go to Coordinates</button>
+                        </div>
+
+                        <button class="btn secondary" id="resetView">Reset View</button>
+                    </div>
+                </div>
+
+                <!-- Help Panel -->
+                <div class="panel collapsible collapsed" id="help-panel">
+                    <h3>🎮 Controls</h3>
+                    <div class="panel-content">
+                        <ul>
+                            <li><kbd>W/S</kbd> Forward / Backward</li>
+                            <li><kbd>A/D</kbd> Left / Right</li>
+                            <li><kbd>Q/E</kbd> Up / Down</li>
+                            <li><kbd>↑/↓</kbd> Eye separation</li>
+                            <li><kbd>←/→</kbd> Rotate heading</li>
+                            <li><kbd>R</kbd> Reset view</li>
+                            <li><kbd>T</kbd> Toggle terrain exag.</li>
+                            <li><kbd>G</kbd> Toggle glasses mode</li>
+                            <li><strong>Mouse (left view):</strong></li>
+                            <li>• Left drag: Rotate</li>
+                            <li>• Right drag: Zoom</li>
+                            <li>• Middle drag: Pan</li>
+                            <li>• Scroll: Zoom</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================
+        // STEREO EARTH - Stereoscopic Globe Viewer
+        // ============================================
+
+        const CONFIG = {
+            defaultEyeSeparation: 1000,
+            defaultPitch: -45,
+            defaultHeading: 0,
+            cesiumIonToken: 'INSERT CESIUM ION TOKEN HERE',
+            modeDescriptions: {
+                parallel: 'Cross your eyes to merge the images',
+                cross: 'Relax your eyes and look "through" the screen',
+                anaglyph: 'Put on red-cyan 3D glasses (red=left eye)'
+            }
+        };
+
+        let state = {
+            eyeSeparation: CONFIG.defaultEyeSeparation,
+            stereoMode: 'parallel',
+            terrainExaggeration: 1.0,
+            viewAngle: CONFIG.defaultPitch,
+            heading: CONFIG.defaultHeading,
+            syncInProgress: false,
+            compassDragging: false
+        };
+
+        let viewerLeft, viewerRight;
+
+        // ============================================
+        // INITIALIZATION
+        // ============================================
+
+        async function init() {
+            Cesium.Ion.defaultAccessToken = CONFIG.cesiumIonToken;
+
+            try {
+                viewerLeft = new Cesium.Viewer('cesiumContainerLeft', {
+                    terrainProvider: await Cesium.CesiumTerrainProvider.fromIonAssetId(1),
+                    baseLayerPicker: false,
+                    geocoder: false,
+                    homeButton: false,
+                    infoBox: false,
+                    navigationHelpButton: false,
+                    sceneModePicker: false,
+                    selectionIndicator: false,
+                    timeline: false,
+                    animation: false,
+                    fullscreenButton: false,
+                    vrButton: false
+                });
+
+                viewerRight = new Cesium.Viewer('cesiumContainerRight', {
+                    terrainProvider: await Cesium.CesiumTerrainProvider.fromIonAssetId(1),
+                    baseLayerPicker: false,
+                    geocoder: false,
+                    homeButton: false,
+                    infoBox: false,
+                    navigationHelpButton: false,
+                    sceneModePicker: false,
+                    selectionIndicator: false,
+                    timeline: false,
+                    animation: false,
+                    fullscreenButton: false,
+                    vrButton: false
+                });
+
+                viewerLeft.scene.globe.depthTestAgainstTerrain = true;
+                viewerRight.scene.globe.depthTestAgainstTerrain = true;
+
+                // Enable left viewer controls
+                const leftController = viewerLeft.scene.screenSpaceCameraController;
+                leftController.enableRotate = true;
+                leftController.enableTranslate = true;
+                leftController.enableZoom = true;
+                leftController.enableTilt = true;
+                leftController.enableLook = true;
+
+                // Disable right viewer controls
+                const rightController = viewerRight.scene.screenSpaceCameraController;
+                rightController.enableRotate = false;
+                rightController.enableTranslate = false;
+                rightController.enableZoom = false;
+                rightController.enableTilt = false;
+                rightController.enableLook = false;
+
+                // Set initial camera
+                const initialPosition = Cesium.Cartesian3.fromDegrees(-112.1401, 36.0544, 8000);
+                viewerLeft.camera.setView({
+                    destination: initialPosition,
+                    orientation: {
+                        heading: Cesium.Math.toRadians(state.heading),
+                        pitch: Cesium.Math.toRadians(state.viewAngle),
+                        roll: 0
+                    }
+                });
+
+                setupCameraSync();
+                setupControls();
+                setupKeyboardControls();
+                setupCollapsiblePanels();
+                setupCompass();
+                setupSearch();
+                generateCompassTicks();
+
+                syncRightCamera();
+                setInterval(updateInfoPanel, 200);
+
+                // Keep horizon level - enforce roll = 0
+                viewerLeft.camera.changed.addEventListener(enforceHorizontalHorizon);
+
+                document.getElementById('loading-overlay').style.display = 'none';
+                console.log('Stereo Earth initialized successfully!');
+
+            } catch (error) {
+                console.error('Failed to initialize:', error);
+                document.getElementById('loading-overlay').innerHTML = 
+                    `<p style="color: #e94560;">Error loading terrain.<br><small>${error.message}</small></p>`;
+            }
+        }
+
+        // ============================================
+        // ENFORCE HORIZONTAL HORIZON
+        // ============================================
+
+        function enforceHorizontalHorizon() {
+            const camera = viewerLeft.camera;
+            if (Math.abs(camera.roll) > 0.001) {
+                camera.setView({
+                    orientation: {
+                        heading: camera.heading,
+                        pitch: camera.pitch,
+                        roll: 0
+                    }
+                });
+            }
+            updateCompassFromCamera();
+            updateViewAngleFromCamera();
+            syncRightCamera();
+        }
+
+        // ============================================
+        // CAMERA SYNCHRONIZATION
+        // ============================================
+
+        function setupCameraSync() {
+            viewerLeft.camera.changed.addEventListener(() => {
+                if (!state.syncInProgress) {
+                    syncRightCamera();
+                }
+            });
+
+            viewerLeft.camera.moveEnd.addEventListener(() => {
+                if (!state.syncInProgress) {
+                    syncRightCamera();
+                }
+            });
+        }
+
+        function syncRightCamera() {
+            if (state.syncInProgress) return;
+            state.syncInProgress = true;
+
+            try {
+                const leftCam = viewerLeft.camera;
+                
+                const position = leftCam.positionWC.clone();
+                const direction = leftCam.directionWC.clone();
+                const up = leftCam.upWC.clone();
+                const right = leftCam.rightWC.clone();
+
+                const swapEyes = (state.stereoMode === 'cross' || state.stereoMode === 'anaglyph');
+                const offsetMultiplier = swapEyes ? 1 : -1;
+
+                const rightOffset = Cesium.Cartesian3.multiplyByScalar(
+                    right, 
+                    state.eyeSeparation * offsetMultiplier, 
+                    new Cesium.Cartesian3()
+                );
+                const rightPosition = Cesium.Cartesian3.add(position, rightOffset, new Cesium.Cartesian3());
+
+                viewerRight.camera.setView({
+                    destination: rightPosition,
+                    orientation: {
+                        direction: direction,
+                        up: up
+                    }
+                });
+
+            } finally {
+                state.syncInProgress = false;
+            }
+        }
+
+        // ============================================
+        // COMPASS
+        // ============================================
+
+        function generateCompassTicks() {
+            const ticksGroup = document.getElementById('compassTicks');
+            ticksGroup.innerHTML = '';
+            
+            for (let i = 0; i < 36; i++) {
+                const angle = i * 10;
+                const isMajor = i % 9 === 0;
+                const length = isMajor ? 8 : 4;
+                const x1 = 60 + 48 * Math.sin(angle * Math.PI / 180);
+                const y1 = 60 - 48 * Math.cos(angle * Math.PI / 180);
+                const x2 = 60 + (48 - length) * Math.sin(angle * Math.PI / 180);
+                const y2 = 60 - (48 - length) * Math.cos(angle * Math.PI / 180);
+                
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', x1);
+                line.setAttribute('y1', y1);
+                line.setAttribute('x2', x2);
+                line.setAttribute('y2', y2);
+                line.setAttribute('stroke', isMajor ? '#4ecca3' : '#0f3460');
+                line.setAttribute('stroke-width', isMajor ? 2 : 1);
+                ticksGroup.appendChild(line);
+            }
+        }
+
+        function setupCompass() {
+            const compass = document.getElementById('compass');
+            
+            compass.addEventListener('mousedown', startCompassDrag);
+            document.addEventListener('mousemove', dragCompass);
+            document.addEventListener('mouseup', stopCompassDrag);
+            
+            compass.addEventListener('touchstart', startCompassDrag, { passive: false });
+            document.addEventListener('touchmove', dragCompass, { passive: false });
+            document.addEventListener('touchend', stopCompassDrag);
+        }
+
+        function startCompassDrag(e) {
+            e.preventDefault();
+            state.compassDragging = true;
+            updateCompassFromEvent(e);
+        }
+
+        function dragCompass(e) {
+            if (!state.compassDragging) return;
+            e.preventDefault();
+            updateCompassFromEvent(e);
+        }
+
+        function stopCompassDrag() {
+            state.compassDragging = false;
+        }
+
+        function updateCompassFromEvent(e) {
+            const compass = document.getElementById('compass');
+            const rect = compass.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            
+            let clientX, clientY;
+            if (e.touches) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+            
+            const dx = clientX - centerX;
+            const dy = clientY - centerY;
+            let angle = Math.atan2(dx, -dy) * 180 / Math.PI;
+            if (angle < 0) angle += 360;
+            
+            state.heading = angle;
+            updateCompassDisplay();
+            applyCameraHeading();
+        }
+
+        function updateCompassDisplay() {
+            const needle = document.getElementById('compassNeedle');
+            needle.setAttribute('transform', `rotate(${state.heading}, 60, 60)`);
+            
+            const headingText = document.getElementById('compassHeading');
+            const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+            const index = Math.round(state.heading / 45) % 8;
+            headingText.textContent = `${Math.round(state.heading)}° ${directions[index]}`;
+        }
+
+        function updateCompassFromCamera() {
+            if (state.compassDragging) return;
+            const heading = Cesium.Math.toDegrees(viewerLeft.camera.heading);
+            state.heading = (heading + 360) % 360;
+            updateCompassDisplay();
+        }
+
+        function applyCameraHeading() {
+            const camera = viewerLeft.camera;
+            camera.setView({
+                orientation: {
+                    heading: Cesium.Math.toRadians(state.heading),
+                    pitch: camera.pitch,
+                    roll: 0
+                }
+            });
+        }
+
+        // ============================================
+        // LOCATION SEARCH
+        // ============================================
+
+        function setupSearch() {
+            const searchInput = document.getElementById('locationSearch');
+            const searchBtn = document.getElementById('searchBtn');
+            const searchResults = document.getElementById('searchResults');
+
+            searchBtn.addEventListener('click', performSearch);
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') performSearch();
+            });
+
+            // Hide results when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.search-wrapper')) {
+                    searchResults.classList.remove('visible');
+                }
+            });
+        }
+
+        async function performSearch() {
+            const query = document.getElementById('locationSearch').value.trim();
+            if (!query) return;
+
+            const searchBtn = document.getElementById('searchBtn');
+            const searchStatus = document.getElementById('searchStatus');
+            const searchResults = document.getElementById('searchResults');
+
+            searchBtn.disabled = true;
+            searchStatus.textContent = 'Searching...';
+            searchResults.classList.remove('visible');
+
+            try {
+                // Use Nominatim (OpenStreetMap) for geocoding - free and no API key needed
+                const response = await fetch(
+                    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`,
+                    {
+                        headers: {
+                            'Accept': 'application/json',
+                            'User-Agent': 'StereoEarth/1.0'
+                        }
+                    }
+                );
+
+                const results = await response.json();
+
+                if (results.length === 0) {
+                    searchStatus.textContent = 'No results found';
+                    return;
+                }
+
+                searchStatus.textContent = '';
+                searchResults.innerHTML = '';
+
+                results.forEach(result => {
+                    const div = document.createElement('div');
+                    div.className = 'search-result-item';
+                    div.textContent = result.display_name;
+                    div.addEventListener('click', () => {
+                        flyToLocation(
+                            parseFloat(result.lat),
+                            parseFloat(result.lon),
+                            result.display_name
+                        );
+                        searchResults.classList.remove('visible');
+                        document.getElementById('locationSearch').value = result.display_name.split(',')[0];
+                    });
+                    searchResults.appendChild(div);
+                });
+
+                searchResults.classList.add('visible');
+
+            } catch (error) {
+                console.error('Search error:', error);
+                searchStatus.textContent = 'Search failed. Try again.';
+            } finally {
+                searchBtn.disabled = false;
+            }
+        }
+
+        function flyToLocation(lat, lon, name) {
+            // Determine appropriate altitude based on type of location
+            let altitude = 10000; // Default
+            
+            // Adjust eye separation based on altitude
+            state.eyeSeparation = Math.max(100, altitude / 10);
+            updateEyeSeparationDisplay();
+
+            viewerLeft.camera.flyTo({
+                destination: Cesium.Cartesian3.fromDegrees(lon, lat, altitude),
+                orientation: {
+                    heading: Cesium.Math.toRadians(state.heading),
+                    pitch: Cesium.Math.toRadians(-45),
+                    roll: 0
+                },
+                duration: 3,
+                complete: () => {
+                    syncRightCamera();
+                }
+            });
+        }
+
+        // ============================================
+        // VIEW MODE MANAGEMENT
+        // ============================================
+
+        function setViewMode(mode) {
+            state.stereoMode = mode;
+            const container = document.getElementById('viewer-container');
+            
+            container.classList.remove('side-by-side', 'anaglyph');
+            
+            if (mode === 'anaglyph') {
+                container.classList.add('anaglyph');
+            } else {
+                container.classList.add('side-by-side');
+            }
+
+            document.getElementById('modeDescription').textContent = CONFIG.modeDescriptions[mode];
+            document.getElementById('stereoMode').value = mode;
+
+            syncRightCamera();
+
+            setTimeout(() => {
+                viewerLeft.resize();
+                viewerRight.resize();
+            }, 100);
+        }
+
+        function cycleViewMode() {
+            const modes = ['parallel', 'cross', 'anaglyph'];
+            const currentIndex = modes.indexOf(state.stereoMode);
+            const nextIndex = (currentIndex + 1) % modes.length;
+            setViewMode(modes[nextIndex]);
+
+            const indicator = document.getElementById('stereo-mode-indicator');
+            const modeNames = {
+                parallel: 'Cross-Eye Mode',
+                cross: 'Parallel Mode',
+                anaglyph: 'Anaglyph Mode (3D Glasses)'
+            };
+            indicator.textContent = modeNames[modes[nextIndex]];
+            indicator.style.display = 'block';
+            setTimeout(() => indicator.style.display = 'none', 2000);
+        }
+
+        // ============================================
+        // UI CONTROLS
+        // ============================================
+
+        function setupControls() {
+            document.getElementById('eyeSeparation').addEventListener('input', (e) => {
+                state.eyeSeparation = parseFloat(e.target.value);
+                updateEyeSeparationDisplay();
+                syncRightCamera();
+            });
+
+            document.getElementById('viewAngle').addEventListener('input', (e) => {
+                state.viewAngle = parseFloat(e.target.value);
+                document.getElementById('viewAngleValue').textContent = state.viewAngle + '°';
+                
+                const camera = viewerLeft.camera;
+                camera.setView({
+                    orientation: {
+                        heading: camera.heading,
+                        pitch: Cesium.Math.toRadians(state.viewAngle),
+                        roll: 0
+                    }
+                });
+            });
+
+            document.getElementById('terrainExaggeration').addEventListener('input', (e) => {
+                state.terrainExaggeration = parseFloat(e.target.value);
+                viewerLeft.scene.verticalExaggeration = state.terrainExaggeration;
+                viewerRight.scene.verticalExaggeration = state.terrainExaggeration;
+                document.getElementById('terrainExaggerationValue').textContent = 
+                    state.terrainExaggeration.toFixed(1) + 'x';
+            });
+
+            document.getElementById('stereoMode').addEventListener('change', (e) => {
+                setViewMode(e.target.value);
+                
+                const indicator = document.getElementById('stereo-mode-indicator');
+                const modeNames = {
+                    parallel: 'Cross-Eye Mode',
+                    cross: 'Parallel Mode',
+                    anaglyph: 'Anaglyph Mode (3D Glasses)'
+                };
+                indicator.textContent = modeNames[e.target.value];
+                indicator.style.display = 'block';
+                setTimeout(() => indicator.style.display = 'none', 2000);
+            });
+
+            document.getElementById('goToCoords').addEventListener('click', goToCoordinates);
+            
+            // Allow Enter key in lat/lon inputs
+            document.getElementById('latInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') goToCoordinates();
+            });
+            document.getElementById('lonInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') goToCoordinates();
+            });
+
+            document.getElementById('resetView').addEventListener('click', resetView);
+        }
+
+        function setupCollapsiblePanels() {
+            document.querySelectorAll('.panel.collapsible h3').forEach(header => {
+                header.addEventListener('click', () => {
+                    header.parentElement.classList.toggle('collapsed');
+                });
+            });
+        }
+
+        function updateEyeSeparationDisplay() {
+            const sep = state.eyeSeparation;
+            let displayValue;
+            
+            if (sep >= 1000) {
+                displayValue = (sep / 1000).toFixed(1) + ' km';
+            } else {
+                displayValue = sep.toLocaleString() + ' m';
+            }
+            
+            document.getElementById('eyeSeparationValue').textContent = displayValue;
+            document.getElementById('infoEyeSep').textContent = displayValue;
+            document.getElementById('eyeSeparation').value = sep;
+        }
+
+        function updateViewAngleFromCamera() {
+            const pitch = Cesium.Math.toDegrees(viewerLeft.camera.pitch);
+            state.viewAngle = Math.round(pitch);
+            document.getElementById('viewAngle').value = state.viewAngle;
+            document.getElementById('viewAngleValue').textContent = state.viewAngle + '°';
+        }
+
+        function goToCoordinates() {
+            const latStr = document.getElementById('latInput').value.trim();
+            const lonStr = document.getElementById('lonInput').value.trim();
+            
+            if (!latStr || !lonStr) {
+                alert('Please enter both latitude and longitude');
+                return;
+            }
+            
+            const lat = parseFloat(latStr);
+            const lon = parseFloat(lonStr);
+            
+            if (isNaN(lat) || isNaN(lon)) {
+                alert('Invalid coordinates. Please enter numeric values.');
+                return;
+            }
+            
+            if (lat < -90 || lat > 90) {
+                alert('Latitude must be between -90 and 90');
+                return;
+            }
+            
+            if (lon < -180 || lon > 180) {
+                alert('Longitude must be between -180 and 180');
+                return;
+            }
+            
+            // Get current altitude or use default
+            const currentAlt = Cesium.Cartographic.fromCartesian(viewerLeft.camera.positionWC).height;
+            const altitude = Math.max(1000, currentAlt);
+            
+            viewerLeft.camera.flyTo({
+                destination: Cesium.Cartesian3.fromDegrees(lon, lat, altitude),
+                orientation: {
+                    heading: Cesium.Math.toRadians(state.heading),
+                    pitch: Cesium.Math.toRadians(state.viewAngle),
+                    roll: 0
+                },
+                duration: 3,
+                complete: () => {
+                    syncRightCamera();
+                }
+            });
+        }
+
+        function resetView() {
+            state.eyeSeparation = CONFIG.defaultEyeSeparation;
+            state.terrainExaggeration = 1.0;
+            state.viewAngle = CONFIG.defaultPitch;
+            state.heading = CONFIG.defaultHeading;
+            
+            document.getElementById('eyeSeparation').value = state.eyeSeparation;
+            document.getElementById('terrainExaggeration').value = state.terrainExaggeration;
+            document.getElementById('viewAngle').value = state.viewAngle;
+            
+            updateEyeSeparationDisplay();
+            document.getElementById('terrainExaggerationValue').textContent = '1.0x';
+            document.getElementById('viewAngleValue').textContent = state.viewAngle + '°';
+            updateCompassDisplay();
+            
+            viewerLeft.scene.verticalExaggeration = 1.0;
+            viewerRight.scene.verticalExaggeration = 1.0;
+
+            viewerLeft.camera.flyTo({
+                destination: Cesium.Cartesian3.fromDegrees(-112.1401, 36.0544, 8000),
+                orientation: {
+                    heading: Cesium.Math.toRadians(state.heading),
+                    pitch: Cesium.Math.toRadians(state.viewAngle),
+                    roll: 0
+                },
+                duration: 2,
+                complete: () => {
+                    syncRightCamera();
+                }
+            });
+        }
+
+        // ============================================
+        // KEYBOARD CONTROLS
+        // ============================================
+
+        function setupKeyboardControls() {
+            const moveSpeed = 100;
+            const rotateSpeed = 5; // degrees
+            const sepAdjustSpeed = 50;
+
+            document.addEventListener('keydown', (e) => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+                if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                    e.preventDefault();
+                }
+
+                const camera = viewerLeft.camera;
+                const cameraHeight = Cesium.Cartographic.fromCartesian(camera.positionWC).height;
+                const speedMultiplier = Math.max(1, cameraHeight / 1000);
+
+                switch(e.key.toLowerCase()) {
+                    case 'w':
+                        camera.moveForward(moveSpeed * speedMultiplier);
+                        break;
+                    case 's':
+                        camera.moveBackward(moveSpeed * speedMultiplier);
+                        break;
+                    case 'a':
+                        camera.moveLeft(moveSpeed * speedMultiplier);
+                        break;
+                    case 'd':
+                        camera.moveRight(moveSpeed * speedMultiplier);
+                        break;
+                    case 'q':
+                        camera.moveUp(moveSpeed * speedMultiplier);
+                        break;
+                    case 'e':
+                        camera.moveDown(moveSpeed * speedMultiplier);
+                        break;
+                    case 'arrowup':
+                        state.eyeSeparation = Math.min(100000, state.eyeSeparation + sepAdjustSpeed * speedMultiplier);
+                        updateEyeSeparationDisplay();
+                        syncRightCamera();
+                        break;
+                    case 'arrowdown':
+                        state.eyeSeparation = Math.max(10, state.eyeSeparation - sepAdjustSpeed * speedMultiplier);
+                        updateEyeSeparationDisplay();
+                        syncRightCamera();
+                        break;
+                    case 'arrowleft':
+                        state.heading = (state.heading - rotateSpeed + 360) % 360;
+                        updateCompassDisplay();
+                        applyCameraHeading();
+                        break;
+                    case 'arrowright':
+                        state.heading = (state.heading + rotateSpeed) % 360;
+                        updateCompassDisplay();
+                        applyCameraHeading();
+                        break;
+                    case 'r':
+                        resetView();
+                        break;
+                    case 't':
+                        state.terrainExaggeration = state.terrainExaggeration >= 3 ? 1 : state.terrainExaggeration + 0.5;
+                        viewerLeft.scene.verticalExaggeration = state.terrainExaggeration;
+                        viewerRight.scene.verticalExaggeration = state.terrainExaggeration;
+                        document.getElementById('terrainExaggeration').value = state.terrainExaggeration;
+                        document.getElementById('terrainExaggerationValue').textContent = 
+                            state.terrainExaggeration.toFixed(1) + 'x';
+                        break;
+                    case 'g':
+                        cycleViewMode();
+                        break;
+                }
+            });
+        }
+
+        // ============================================
+        // INFO PANEL UPDATE
+        // ============================================
+
+        function updateInfoPanel() {
+            try {
+                const camera = viewerLeft.camera;
+                const cartographic = Cesium.Cartographic.fromCartesian(camera.positionWC);
+                
+                if (!cartographic) return;
+
+                const lat = Cesium.Math.toDegrees(cartographic.latitude);
+                const lon = Cesium.Math.toDegrees(cartographic.longitude);
+                const alt = cartographic.height;
+
+                const pitch = Cesium.Math.toDegrees(camera.pitch);
+                const groundDist = pitch < 0 ? alt / Math.tan(Math.abs(camera.pitch)) : alt;
+
+                document.getElementById('infoLat').textContent = lat.toFixed(4) + '°';
+                document.getElementById('infoLon').textContent = lon.toFixed(4) + '°';
+                document.getElementById('infoPitch').textContent = pitch.toFixed(1) + '°';
+                
+                if (alt >= 1000000) {
+                    document.getElementById('infoAltitude').textContent = (alt / 1000).toFixed(0) + ' km';
+                } else if (alt >= 1000) {
+                    document.getElementById('infoAltitude').textContent = (alt / 1000).toFixed(2) + ' km';
+                } else {
+                    document.getElementById('infoAltitude').textContent = alt.toFixed(0) + ' m';
+                }
+
+                if (groundDist >= 1000000) {
+                    document.getElementById('infoGroundDist').textContent = (groundDist / 1000).toFixed(0) + ' km';
+                } else if (groundDist >= 1000) {
+                    document.getElementById('infoGroundDist').textContent = (groundDist / 1000).toFixed(2) + ' km';
+                } else {
+                    document.getElementById('infoGroundDist').textContent = groundDist.toFixed(0) + ' m';
+                }
+
+            } catch (e) {
+                // Silently handle errors
+            }
+        }
+
+        // ============================================
+        // START APPLICATION
+        // ============================================
+
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
